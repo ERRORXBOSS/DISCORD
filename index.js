@@ -10,14 +10,16 @@ const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('Bot is running!'));
 app.listen(PORT, () => console.log(`Web server is listening on port ${PORT}`));
 
-// Initialize Discord Client with required Intents
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildVoiceStates,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ]
+// Initialize DisTube with cookies/options to bypass 429
+const distube = new DisTube(client, {
+    plugins: [
+        new YtDlpPlugin({
+            update: true,
+        }),
+    ],
+    emitNewSongOnly: true,
+    leaveOnEmpty: true,
+    leaveOnFinish: false,
 });
 
 // Initialize DisTube
