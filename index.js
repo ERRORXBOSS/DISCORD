@@ -5,30 +5,27 @@ const express = require('express');
 const fs = require('fs');
 require('dotenv').config();
 
-// Fixed Netscape Cookie File with proper tab separation
-const cookieData = `# Netscape HTTP Cookie File
-# https://curl.haxx.se/rfc/cookie_spec.html
-.youtube.com	TRUE	/	TRUE	1825333474	__Secure-1PSIDTS	sidts-CjYBnJZzajKW5HHHwJZsafOvhYHQL-FeQ76C-a9ocgG0Z5P4FkAliEjsZEhEZeWepjLQJfN4LP4QAA
-.youtube.com	TRUE	/	TRUE	1793798074	__Secure-1PSIDRTS	sidts-CjYBnJZzajKW5HHHwJZsafOvhYHQL-FeQ76C-a9ocgG0Z5P4FkAliEjsZEhEZeWepjLQJfN4LP4QAA
-.youtube.com	TRUE	/	TRUE	1825333474	__Secure-3PSIDTS	sidts-CjYBnJZzajKW5HHHwJZsafOvhYHQL-FeQ76C-a9ocgG0Z5P4FkAliEjsZEhEZeWepjLQJfN4LP4QAA
-.youtube.com	TRUE	/	TRUE	1793798074	__Secure-3PSIDRTS	sidts-CjYBnJZzajKW5HHHwJZsafOvhYHQL-FeQ76C-a9ocgG0Z5P4FkAliEjsZEhEZeWepjLQJfN4LP4QAA
-.youtube.com	TRUE	/	TRUE	1793799275	GPS	1
-.youtube.com	TRUE	/	TRUE	1828357477	PREF	f6=40000000&tz=Asia.Dhaka
-.youtube.com	TRUE	/	TRUE	1809349475	__Secure-YNID	CtkBCAUSiwEBDB6PDG4Z6CKM3E73kTopEcwdqx9Iq00_4FKc6OYroZ4v8L9JxTKksZ07D_ci3F1NpwiT01NVv5GaAFg9K8c_uR_V2GanNigCgU1UgrIyq8z29dUxN71i7dWzBPEssmNfMQmSAg_xAJh087IJaKcMCgYFZFEkZz_zLFfjMjlozqg0yqHV8ekp3mf8KAUyRQEcWPVq_0L29tf1athClefl4zu0hlFmhpyoyoMAr7Kqf8OY4UFYXbLPCcXzzOLlVHaffCsuPCqcU9SgjG7XXcsTEACIBQ
-.youtube.com	TRUE	/	TRUE	0	YSC	PCrzAAaN0Vk
-.youtube.com	TRUE	/	TRUE	1809349477	VISITOR_INFO1_LIVE	XISzIxcXHao
-.youtube.com	TRUE	/	TRUE	1809349477	VISITOR_PRIVACY_METADATA	CgJCRBIEGgAgGA%3D%3D
-.youtube.com	TRUE	/	TRUE	1809349475	__Secure-ROLLOUT_TOKEN	CK3wtJ7QlYbxrAEQr4e2sLDulwMYhPnXsLDulwM%3D`;
+// ---- YouTube cookies ----
+// Cookies are read from the YT_COOKIES environment variable (never stored in code).
+const COOKIE_PATH = './cookies.txt';
+if (process.env.YT_COOKIES) {
+    // Support both real newlines and "\n" escapes (Render/.env often store them as escapes)
+    fs.writeFileSync(COOKIE_PATH, process.env.YT_COOKIES.replace(/\\n/g, '\n'));
+    console.log('YouTube cookies loaded from environment.');
+} else {
+    console.warn('YT_COOKIES is not set. YouTube may return 429 (rate limit) errors.');
+}
 
-fs.writeFileSync('./cookies.txt', cookieData);
+const pluginOptions = { update: true };
+if (fs.existsSync(COOKIE_PATH)) pluginOptions.cookies = COOKIE_PATH;
 
-// Express server for 24/7 uptime on Render
+// ---- Express server (keeps Render web service alive) ----
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('Bot is running!'));
 app.listen(PORT, () => console.log(`Web server is listening on port ${PORT}`));
 
-// Initialize Discord Client with required Intents
+// ---- Discord client ----
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -38,24 +35,48 @@ const client = new Client({
     ]
 });
 
-// Initialize DisTube with cookies and auto-update
+// ---- DisTube ----
 const distube = new DisTube(client, {
-    plugins: [
-        new YtDlpPlugin({
-            cookies: './cookies.txt',
-            update: true,
-        }),
-    ],
+    plugins: [new YtDlpPlugin(pluginOptions)],
     emitNewSongOnly: true,
     leaveOnEmpty: true,
     leaveOnFinish: false,
 });
 
+// DisTube reports most playback errors through this event instead of throwing
+distube.on('error', (error, queue) => {
+    console.error('DisTube error:', error);
+    const friendly = explainError(error);
+    if (queue?.textChannel) queue.textChannel.send(`Error playing song: ${friendly}`).catch(() => {});
+});
+
+function explainError(error) {
+    const msg = error?.message || String(error);
+    if (msg.includes('429')) {
+        return 'YouTube is rate-limiting this bot (429). Try again in a few minutes, or update the YT_COOKIES value.';
+    }
+    return msg;
+}
+
+// Retry a few times on 429, since it is often temporary
+async function playWithRetry(voiceChannel, query, options, attempts = 3) {
+    for (let i = 1; i <= attempts; i++) {
+        try {
+            return await distube.play(voiceChannel, query, options);
+        } catch (error) {
+            const isRateLimit = String(error.message).includes('429');
+            if (!isRateLimit || i === attempts) throw error;
+            console.warn(`429 from YouTube, retrying (${i}/${attempts})...`);
+            await new Promise(r => setTimeout(r, 3000 * i));
+        }
+    }
+}
+
 client.once('ready', () => {
     console.log(`Logged in successfully as ${client.user.tag}!`);
 });
 
-// Message command handler for !play
+// ---- !play command ----
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
     if (!message.content.startsWith('!play')) return;
@@ -64,7 +85,7 @@ client.on('messageCreate', async message => {
     const query = args.slice(1).join(' ');
 
     if (!query) {
-        return message.reply('Please provide a valid YouTube URL!');
+        return message.reply('Please provide a YouTube URL or a song name. Example: `!play never gonna give you up`');
     }
 
     const voiceChannel = message.member?.voice?.channel;
@@ -73,15 +94,19 @@ client.on('messageCreate', async message => {
     }
 
     try {
-        await distube.play(voiceChannel, query, {
+        await playWithRetry(voiceChannel, query, {
             textChannel: message.channel,
             member: message.member,
         });
     } catch (error) {
         console.error(error);
-        message.reply(`Error playing song: ${error.message}`);
+        message.reply(`Error playing song: ${explainError(error)}`);
     }
 });
 
-// Login to Discord using TOKEN from Environment Variables
+// ---- Login ----
+if (!process.env.TOKEN) {
+    console.error('TOKEN is missing. Set it in your environment variables.');
+    process.exit(1);
+}
 client.login(process.env.TOKEN);
