@@ -1,5 +1,6 @@
 const { Client, GatewayIntentBits } = require('discord.js');
 const { DisTube } = require('distube');
+const { YtDlpPlugin } = require('@distube/yt-dlp');
 const express = require('express');
 require('dotenv').config();
 
@@ -25,10 +26,11 @@ const client = new Client({
     ]
 });
 
-// Initialize DisTube Music Player
+// Initialize DisTube Music Player with YtDlpPlugin for playing links
 const distube = new DisTube(client, {
     emitNewSongOnly: true,
-    savePreviousSongs: true
+    savePreviousSongs: true,
+    plugins: [new YtDlpPlugin()]
 });
 
 client.once('ready', () => {
