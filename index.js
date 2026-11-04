@@ -5,11 +5,9 @@ const express = require('express');
 const fs = require('fs');
 require('dotenv').config();
 
-// Embedded YouTube cookies to bypass 429 rate limit
+// Fixed Netscape Cookie File with proper tab separation
 const cookieData = `# Netscape HTTP Cookie File
 # https://curl.haxx.se/rfc/cookie_spec.html
-# This is a generated file! Do not edit.
-
 .youtube.com	TRUE	/	TRUE	1825333474	__Secure-1PSIDTS	sidts-CjYBnJZzajKW5HHHwJZsafOvhYHQL-FeQ76C-a9ocgG0Z5P4FkAliEjsZEhEZeWepjLQJfN4LP4QAA
 .youtube.com	TRUE	/	TRUE	1793798074	__Secure-1PSIDRTS	sidts-CjYBnJZzajKW5HHHwJZsafOvhYHQL-FeQ76C-a9ocgG0Z5P4FkAliEjsZEhEZeWepjLQJfN4LP4QAA
 .youtube.com	TRUE	/	TRUE	1825333474	__Secure-3PSIDTS	sidts-CjYBnJZzajKW5HHHwJZsafOvhYHQL-FeQ76C-a9ocgG0Z5P4FkAliEjsZEhEZeWepjLQJfN4LP4QAA
@@ -40,7 +38,7 @@ const client = new Client({
     ]
 });
 
-// Initialize DisTube with embedded cookies and auto-update
+// Initialize DisTube with cookies and auto-update
 const distube = new DisTube(client, {
     plugins: [
         new YtDlpPlugin({
